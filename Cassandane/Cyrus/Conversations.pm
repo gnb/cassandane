@@ -74,14 +74,6 @@ sub tear_down
     $self->SUPER::tear_down();
 }
 
-# Calculate a CID from a message - this is the CID that the
-# first message in a new conversation will be assigned.
-sub calc_cid
-{
-    my ($msg) = @_;
-    return substr(sha1_hex($msg->as_string()), 0, 16);
-}
-
 # The resulting CID when a clash happens is supposed to be
 # the MAXIMUM of all the CIDs.  Here we use the fact that
 # CIDs are expressed in a form where lexical order is the
@@ -106,22 +98,22 @@ sub test_append
 
     xlog "generating message A";
     $exp{A} = $self->make_message("Message A");
-    $exp{A}->set_attributes(uid => 1, cid => calc_cid($exp{A}));
+    $exp{A}->set_attributes(uid => 1, cid => $exp{A}->make_cid());
     $self->check_messages(\%exp);
 
     xlog "generating message B";
     $exp{B} = $self->make_message("Message B");
-    $exp{B}->set_attributes(uid => 2, cid => calc_cid($exp{B}));
+    $exp{B}->set_attributes(uid => 2, cid => $exp{B}->make_cid());
     $self->check_messages(\%exp);
 
     xlog "generating message C";
     $exp{C} = $self->make_message("Message C");
-    $exp{C}->set_attributes(uid => 3, cid => calc_cid($exp{C}));
+    $exp{C}->set_attributes(uid => 3, cid => $exp{C}->make_cid());
     my $actual = $self->check_messages(\%exp);
 
     xlog "generating message D";
     $exp{D} = $self->make_message("Message D");
-    $exp{D}->set_attributes(uid => 4, cid => calc_cid($exp{D}));
+    $exp{D}->set_attributes(uid => 4, cid => $exp{D}->make_cid());
     $self->check_messages(\%exp);
 }
 
@@ -139,12 +131,12 @@ sub test_append_clash
 
     xlog "generating message A";
     $exp{A} = $self->make_message("Message A");
-    $exp{A}->set_attributes(uid => 1, cid => calc_cid($exp{A}));
+    $exp{A}->set_attributes(uid => 1, cid => $exp{A}->make_cid());
     $self->check_messages(\%exp);
 
     xlog "generating message B";
     $exp{B} = $self->make_message("Message B");
-    $exp{B}->set_attributes(uid => 2, cid => calc_cid($exp{B}));
+    $exp{B}->set_attributes(uid => 2, cid => $exp{B}->make_cid());
     my $actual = $self->check_messages(\%exp);
 
     xlog "generating message C";
@@ -163,7 +155,7 @@ sub test_append_clash
     my $nextuid = 4;
     foreach my $s (qw(A B))
     {
-	if (calc_cid($actual->{"Message $s"}) ne $ElCid)
+	if ($actual->{"Message $s"}->make_cid() ne $ElCid)
 	{
 	    $exp{$s}->set_attributes(uid => $nextuid, cid => $ElCid);
 	    $nextuid++;
@@ -186,17 +178,17 @@ sub test_double_clash
 
     xlog "generating message A";
     $exp{A} = $self->make_message("Message A");
-    $exp{A}->set_attributes(uid => 1, cid => calc_cid($exp{A}));
+    $exp{A}->set_attributes(uid => 1, cid => $exp{A}->make_cid());
     $self->check_messages(\%exp);
 
     xlog "generating message B";
     $exp{B} = $self->make_message("Message B");
-    $exp{B}->set_attributes(uid => 2, cid => calc_cid($exp{B}));
+    $exp{B}->set_attributes(uid => 2, cid => $exp{B}->make_cid());
     $self->check_messages(\%exp);
 
     xlog "generating message C";
     $exp{C} = $self->make_message("Message C");
-    $exp{C}->set_attributes(uid => 3, cid => calc_cid($exp{C}));
+    $exp{C}->set_attributes(uid => 3, cid => $exp{C}->make_cid());
     my $actual = $self->check_messages(\%exp);
 
     xlog "generating message D";
@@ -217,7 +209,7 @@ sub test_double_clash
     my $nextuid = 5;
     foreach my $s (qw(A B C))
     {
-	if (calc_cid($actual->{"Message $s"}) ne $ElCid)
+	if ($actual->{"Message $s"}->make_cid() ne $ElCid)
 	{
 	    $exp{$s}->set_attributes(uid => $nextuid, cid => $ElCid);
 	    $nextuid++;
@@ -254,21 +246,21 @@ sub test_replication_clash
 
     xlog "generating message A";
     $exp{A} = $self->make_message("Message A", store => $master_store);
-    $exp{A}->set_attributes(uid => 1, cid => calc_cid($exp{A}));
+    $exp{A}->set_attributes(uid => 1, cid => $exp{A}->make_cid());
     $self->run_replication();
     $self->check_messages(\%exp, store => $master_store);
     $self->check_messages(\%exp, store => $replica_store);
 
     xlog "generating message B";
     $exp{B} = $self->make_message("Message B", store => $master_store);
-    $exp{B}->set_attributes(uid => 2, cid => calc_cid($exp{B}));
+    $exp{B}->set_attributes(uid => 2, cid => $exp{B}->make_cid());
     $self->run_replication();
     $self->check_messages(\%exp, store => $master_store);
     $self->check_messages(\%exp, store => $replica_store);
 
     xlog "generating message C";
     $exp{C} = $self->make_message("Message C", store => $master_store);
-    $exp{C}->set_attributes(uid => 3, cid => calc_cid($exp{C}));
+    $exp{C}->set_attributes(uid => 3, cid => $exp{C}->make_cid());
     $self->run_replication();
     my $actual = $self->check_messages(\%exp, store => $master_store);
     $self->check_messages(\%exp, store => $replica_store);
@@ -292,7 +284,7 @@ sub test_replication_clash
     my $nextuid = 5;
     foreach my $s (qw(A B C))
     {
-	if (calc_cid($actual->{"Message $s"}) ne $ElCid)
+	if ($actual->{"Message $s"}->make_cid() ne $ElCid)
 	{
 	    $exp{$s}->set_attributes(uid => $nextuid, cid => $ElCid);
 	    $nextuid++;
@@ -392,7 +384,7 @@ sub test_fm_webui_draft
     $exp{A}->remove_headers('Message-ID');
 #     $exp{A}->add_header('X-ME-Message-ID', '<fake.header@i.am.a.draft>');
     $exp{A}->add_header('X-ME-Message-ID', '<fake1700@fastmail.fm>');
-    $exp{A}->set_attribute(cid => calc_cid($exp{A}));
+    $exp{A}->set_attribute(cid => $exp{A}->make_cid());
 
     $self->{store}->write_begin();
     $self->{store}->write_message($exp{A});
@@ -423,22 +415,13 @@ sub make_threaded_messages
     my $gen = Cassandane::ThreadedGenerator->new(%params);
     my %msgs;
     my %cids;
-    my $uid = 1;
 
     $store->write_begin();
     while (my $msg = $gen->generate(extra_lines => int(rand(50))))
     {
 	$store->write_message($msg);
-
-	# work out the cid
-	my $threadid = $msg->get_header('X-Cassandane-Thread');
-	my $cid = $cids{$threadid};
-	$cid = $cids{$threadid} = calc_cid($msg)
-	    unless defined $cid;
-
-	$msg->set_attributes(uid => $uid, cid => $cid);
-	$msgs{$uid} = $msg;
-	$uid++;
+	$msgs{$msg->get_attribute('uid')} = $msg;
+	$cids{$msg->get_attribute('cid')} = 1;
     }
     $store->write_end();
 
