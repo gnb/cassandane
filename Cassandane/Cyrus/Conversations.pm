@@ -927,4 +927,182 @@ sub test_convsort_sort
     $self->convsort_postcondition($exp_uidn, $exp_hms, 1, $nthreads);
 }
 
+sub convupdates
+{
+    my ($talk, @args) = @_;
+    my $res = {};
+    $talk->_imap_cmd('xconvupdates', 0,
+	{
+	    added => sub {
+		my ($r, $line) = @_;
+		$res->{added} = $line;
+	    },
+	    changed => sub {
+		my ($r, $line) = @_;
+		$res->{changed} = $line;
+	    },
+	    removed => sub {
+		my ($r, $line) = @_;
+		$res->{removed} = $line;
+	    }
+	}, @args)
+	or die "Cannot do xconvupdates: $@";
+    return $res;
+}
+
+sub convupdates_postcondition
+{
+    my ($self, $exp_uidn, $exp_hms, $exp_total) = @_;
+
+    my $talk = $self->{store}->get_client();
+
+    $self->assert_str_equals('ok', $talk->get_last_completion_response());
+
+    $self->assert_num_equals($exp_uidn,
+			     $talk->get_response_code('uidnext'));
+    $self->assert_num_equals($exp_hms,
+			     $talk->get_response_code('highestmodseq'));
+    $self->assert_num_equals($exp_total,
+			     $talk->get_response_code('total'));
+
+    $talk->clear_response_code('uidnext');
+    $talk->clear_response_code('highestmodseq');
+    $talk->clear_response_code('total');
+}
+
+sub test_xconvupdates
+{
+    my ($self) = @_;
+
+    # check IMAP server has the XCONVERSATIONS capability
+    $self->assert($self->{store}->get_client()->capability()->{xconversations});
+
+    my $folder = 'INBOX';
+    my $store = $self->{store};
+    my $talk = $store->get_client();
+    my $res;
+
+    my $uidn = 1;
+    my $olduidn = $uidn;
+    my $hms = 4;
+    my $oldhms = $hms;
+
+    xlog "xconvupdates in message mode on empty mailbox";
+    $res = convupdates($talk, $folder, ['uid'],
+		       ['changedsince', [0, 0]],
+		       'us-ascii', 'all')
+	or die "xconvupdates failed: $@";
+    xlog "expect no added, changed or removed";
+    $self->assert_deep_equals({}, $res);
+    $self->convupdates_postcondition($uidn, $hms, 0);
+
+
+    xlog "APPEND a message";
+    my $gen = Cassandane::ThreadedGenerator->new(nmessages => 100,
+					         nthreads => 15);
+    $store->write_begin();
+    my $msg = $gen->generate();
+    $store->write_message($msg);
+    $store->write_end();
+    $uidn++;
+    $hms++;
+
+    xlog "xconvupdates in message mode again, since 0";
+    $res = convupdates($talk, $folder, ['uid'],
+		       ['changedsince', [0, 0]],
+		       'us-ascii', 'all')
+	or die "xconvupdates failed: $@";
+    xlog "expect no added, changed or removed";
+    $self->assert_deep_equals({ added => [ [1, 1] ]}, $res);
+    $self->convupdates_postcondition($uidn, $hms, 1);
+
+    xlog "xconvupdates in message mode again, since hms/uidn";
+    $res = convupdates($talk, $folder, ['uid'],
+		       ['changedsince', [$oldhms, $olduidn]],
+		       'us-ascii', 'all')
+	or die "xconvupdates failed: $@";
+    xlog "expect no added, changed or removed";
+    $self->assert_deep_equals({ added => [ [1, 1] ]}, $res);
+    $self->convupdates_postcondition($uidn, $hms, 1);
+
+    $oldhms = $hms;
+    $olduidn = $uidn;
+
+    xlog "add some more messages";
+    $store->write_begin();
+    for (1..5)
+    {
+	$msg = $gen->generate();
+	$msg->set_attribute('uid', $uidn);
+	$store->write_message($msg);
+	$uidn++;
+	$hms++;
+    }
+    $store->write_end();
+
+    xlog "xconvupdates in message mode again, since 0";
+    $res = convupdates($talk, $folder, ['uid'],
+		       ['changedsince', [0, 0]],
+		       'us-ascii', 'all')
+	or die "xconvupdates failed: $@";
+    xlog "expect no added, changed or removed";
+    $self->assert_deep_equals({
+	added => [ [1,1], [2,2], [3,3], [4,4], [5,5], [6,6] ]
+    }, $res);
+    $self->convupdates_postcondition($uidn, $hms, 6);
+
+    xlog "xconvupdates in message mode again, since hms/uidn";
+    $res = convupdates($talk, $folder, ['uid'],
+		       ['changedsince', [$oldhms, $olduidn]],
+		       'us-ascii', 'all')
+	or die "xconvupdates failed: $@";
+    xlog "expect no added, changed or removed";
+    $self->assert_deep_equals({
+	added => [ [2,2], [3,3], [4,4], [5,5], [6,6] ]
+    }, $res);
+    $self->convupdates_postcondition($uidn, $hms, 6);
+
+    $oldhms = $hms;
+    $olduidn = $uidn;
+
+    xlog "Change flags on some messages";
+    $talk->store('2,4', '+flags', '(\\Flagged)');
+    # one store command, one modseq bump
+    $hms++;
+
+    xlog "xconvupdates in message mode again, since hms/uidn";
+    $res = convupdates($talk, $folder, ['uid'],
+		       ['changedsince', [$oldhms, $olduidn]],
+		       'us-ascii', 'all')
+	or die "xconvupdates failed: $@";
+    xlog "expect no added, changed or removed";
+    $self->assert_deep_equals({
+	changed => [ 2, 4 ]
+    }, $res);
+    $self->convupdates_postcondition($uidn, $hms, 6);
+
+    $oldhms = $hms;
+    $olduidn = $uidn;
+
+    xlog "Delete some messages";
+    $talk->store('3,4', '+flags', '(\\Deleted)');
+    $talk->expunge();
+    # one modseq for the store() and one for the expunge apparently
+    $hms += 2;
+
+    xlog "xconvupdates in message mode again, since hms/uidn";
+    $res = convupdates($talk, $folder, ['uid'],
+		       ['changedsince', [$oldhms, $olduidn]],
+		       'us-ascii', 'all')
+	or die "xconvupdates failed: $@";
+    xlog "expect no added, changed or removed";
+    $self->assert_deep_equals({
+	removed => [ 3, 4 ]
+    }, $res);
+    $self->convupdates_postcondition($uidn, $hms, 6);
+
+    $oldhms = $hms;
+    $olduidn = $uidn;
+}
+
 1;
