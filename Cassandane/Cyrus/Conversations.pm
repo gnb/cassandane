@@ -417,7 +417,7 @@ sub make_threaded_messages
     my %cids;
 
     $store->write_begin();
-    while (my $msg = $gen->generate(extra_lines => int(rand(50))))
+    while (my $msg = $gen->generate())
     {
 	$store->write_message($msg);
 	$msgs{$msg->get_attribute('uid')} = $msg;
@@ -537,7 +537,9 @@ sub test_convsort_window
     my $talk = $store->get_client();
 
     my ($messages, $nmessages, $nthreads) =
-	    $self->make_threaded_messages(nmessages => 100, nthreads => 15);
+	    $self->make_threaded_messages(nmessages => 100,
+					  nthreads => 15,
+					  max_extra_lines => 50);
     my $exp_uidn = $nmessages+1;
     my $exp_hms = $nmessages+4,
     my $res;
@@ -803,7 +805,9 @@ sub test_convsort_sort
     my $talk = $store->get_client();
 
     my ($messages, $nmessages, $nthreads) =
-	    $self->make_threaded_messages(nmessages => 100, nthreads => 15);
+	    $self->make_threaded_messages(nmessages => 100,
+					  nthreads => 15,
+					  max_extra_lines => 50);
     my $exp_uidn = $nmessages+1;
     my $exp_hms = $nmessages+4,
     my $res;
