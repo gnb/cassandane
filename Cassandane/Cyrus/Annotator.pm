@@ -92,13 +92,12 @@ sub test_add_annot_deliver
 
     my $entry = '/comment';
     my $attrib = 'value.shared';
-    my $shared = 'shared';
     # Data thanks to http://hipsteripsum.me
     my $value1 = 'you_probably_havent_heard_of_them';
 
     my %exp;
     $exp{A} = $self->{gen}->generate(subject => "Message A");
-    $exp{A}->set_body("add_annotation $entry $shared $value1\r\n");
+    $exp{A}->set_body("set_shared_annotation $entry $value1\r\n");
     $self->{instance}->deliver($exp{A});
     $exp{A}->set_annotation($entry, $attrib, $value1);
 
@@ -118,7 +117,6 @@ sub test_add_annot_deliver_tomailbox
 
     my $entry = '/comment';
     my $attrib = 'value.shared';
-    my $shared = 'shared';
     # Data thanks to http://hipsteripsum.me
     my $value1 = 'before_they_sold_out';
 
@@ -129,7 +127,7 @@ sub test_add_annot_deliver_tomailbox
 
     my %exp;
     $exp{A} = $self->{gen}->generate(subject => "Message A");
-    $exp{A}->set_body("add_annotation $entry $shared $value1\r\n");
+    $exp{A}->set_body("set_shared_annotation $entry $value1\r\n");
     $self->{instance}->deliver($exp{A}, folder => $subfolder);
     $exp{A}->set_annotation($entry, $attrib, $value1);
 
@@ -180,7 +178,7 @@ sub test_set_user_flag_deliver
     $self->check_messages(\%exp, check_guid => 0);
 }
 
-# Note: remove_annotation can't really be tested with local
+# Note: clear_{shared,private}_annotation can't really be tested with local
 # delivery, just with the APPEND command.
 
 1;
