@@ -44,6 +44,7 @@ use warnings;
 package Cassandane::Cyrus::Quota;
 use base qw(Cassandane::Cyrus::TestCase);
 use Cwd qw(abs_path);
+use File::Path qw(mkpath);
 use IO::File;
 use DateTime;
 use Cassandane::Util::Log;
@@ -82,12 +83,12 @@ sub _set_limits
     my $expecteds = [];
     my $quotalist = [];
     my $index = 0;
-    $self->{resources} = {};
+    $self->{resources}->{$self->{quotaroot}} = {};
     foreach my $resourcelist (@$resources)
     {
 	my ($resource, $expusage, $limit) = @$resourcelist;
 	$resource = uc($resource);
-	$self->{resources}->{$resource} = {
+	$self->{resources}->{$self->{quotaroot}}->{$resource} = {
 	    index => $index++,
 	    limit => $limit
 	};
@@ -115,7 +116,7 @@ sub _check_usages
     while (scalar(@res)) {
 	my $actual = [splice(@res, 0, 3)];
 	my $resource = $actual->[0];
-	my $resourcedata = $self->{resources}->{$resource};
+	my $resourcedata = $self->{resources}->{$self->{quotaroot}}->{$resource};
 	my $index = $resourcedata->{index};
 	$self->assert_deep_equals([$resource, $expusages->[$index], $resourcedata->{limit}], $actual);
 	# make sure we check each resource only once
@@ -719,6 +720,54 @@ sub test_quotarename
     ]);
 }
 
+sub _write_quota
+{
+    my ($self, $quotaroot, %data) = @_;
+
+    xlog "double check the Config is what we expect";
+    my $backend = $self->{instance}->{config}->get('quota_db');
+    $self->assert_str_equals('quotalegacy', $backend)
+	if defined $backend;	    # the default value is also ok
+
+    my $fdh = $self->{instance}->{config}->get('fulldirhash');
+    $self->assert_str_equals('0', $fdh)
+	if defined $fdh;	    # the default value is also ok
+
+    $data{storage} ||= [ 0, -1 ];
+    $data{message} ||= [ 0, -1 ];
+    $data{'x-annotation-storage'} ||= [ 0, -1 ];
+
+    xlog "Writing quotalegacy file for root \"$quotaroot\"";
+
+    my ($hash) = ($quotaroot =~ m/^user\.(.)/);
+    $hash ||= substr($quotaroot, 0, 1);
+    my $qdir = "$self->{instance}{basedir}/conf/quota/$hash";
+
+    if (! -d $qdir)
+    {
+	mkpath($qdir)
+	    or die "Cannot make $qdir: $!";
+    }
+
+    my $fh = IO::File->new(">$qdir/$quotaroot")
+	or die "Failed to open quota file $qdir/$quotaroot for writing: $!";
+    print $fh $data{storage}->[0] .
+	      "\n" .
+	      $data{storage}->[1] .
+	      " M " .
+	      $data{message}->[0] .
+	      " " .
+	      $data{message}->[1] .
+	      " AS " .
+	      $data{'x-annotation-storage'}->[0] .
+	      " " .
+	      $data{'x-annotation-storage'}->[1] .
+	      "\n";
+    close($fh);
+
+    $self->{instance}->_fix_ownership("$self->{instance}{basedir}/conf/quota");
+}
+
 sub test_quota_f
 {
     my ($self) = @_;
@@ -756,12 +805,10 @@ sub test_quota_f
     $self->assert_num_equals(9, scalar @origcasres);
 
     # create a bogus quota file
-    mkdir("$self->{instance}{basedir}/conf/quota");
-    mkdir("$self->{instance}{basedir}/conf/quota/q");
-    my $fh = IO::File->new(">$self->{instance}{basedir}/conf/quota/q/user.quotafuser") || die "Failed to open quota file";
-    print $fh "0\n100000 M 0 50000 AS 0 10000\n";
-    close($fh);
-    $self->{instance}->_fix_ownership("$self->{instance}{basedir}/conf/quota");
+    $self->_write_quota("user.quotafuser",
+			storage => [ 0, 100000 ],
+			message => [ 0, 50000 ],
+			'x-annotation-storage' => [ 0, 10000 ]);
 
     # find and add the quota
     $self->{instance}->run_command({ cyrus => 1 }, 'quota', '-f');
@@ -858,46 +905,142 @@ sub test_quota_f_vs_update
     $self->_check_usages([int($expected/1024)]);
 }
 
-sub test_prefix_mboxexists
+sub test_quota_f_prefix
 {
     my ($self) = @_;
 
+    xlog "Testing prefix matches with quota -f [IRIS-1029]";
+
+    my $limit = 1000000;
     my $admintalk = $self->{adminstore}->get_client();
 
     $self->{instance}->create_user("base",
 				   subdirs => [ qw(subdir subdir2) ]);
+    $self->_set_quotaroot('user.base');
+    $self->_set_limits([['storage', 0, $limit]]);
+    my $exp_base = 0;
+
+    xlog "Adding messages to user.base";
     $self->{adminstore}->set_folder("user.base");
-    for (1..3) {
-	$self->make_message("base $_", store => $self->{adminstore}, extra_lines => 12345);
+    for (1..10) {
+	my $msg = $self->make_message("base $_",
+				      store => $self->{adminstore},
+				      extra_lines => 5000+rand(50000));
+	$exp_base += length($msg->as_string());
     }
+
+    xlog "Adding messages to user.base.subdir2";
     $self->{adminstore}->set_folder("user.base.subdir2");
-    for (1..3) {
-	$self->make_message("base $_", store => $self->{adminstore}, extra_lines => 12345);
+    for (1..10) {
+	my $msg = $self->make_message("base subdir2 $_",
+				      store => $self->{adminstore},
+				      extra_lines => 5000+rand(50000));
+	$exp_base += length($msg->as_string());
     }
 
     $self->{instance}->create_user("baseplus",
 				   subdirs => [ qw(subdir) ]);
-    $admintalk->setquota("user.baseplus", "(storage 1000000)");
+    $self->_set_quotaroot('user.baseplus');
+    $self->_set_limits([['storage', 0, $limit]]);
+    my $exp_baseplus = 0;
+
+    xlog "Adding messages to user.baseplus";
     $self->{adminstore}->set_folder("user.baseplus");
-    for (1..3) {
-	$self->make_message("baseplus $_", store => $self->{adminstore}, extra_lines => 31419);
+    for (1..10) {
+	my $msg = $self->make_message("baseplus $_",
+				      store => $self->{adminstore},
+				      extra_lines => 5000+rand(50000));
+	$exp_baseplus += length($msg->as_string());
     }
+
+    xlog "Adding messages to user.baseplus.subdir";
     $self->{adminstore}->set_folder("user.baseplus.subdir");
-    for (1..3) {
-	$self->make_message("baseplus $_", store => $self->{adminstore}, extra_lines => 31419);
+    for (1..10) {
+	my $msg = $self->make_message("baseplus subdir $_",
+				      store => $self->{adminstore},
+				      extra_lines => 5000+rand(50000));
+	$exp_baseplus += length($msg->as_string());
     }
 
-    my @origplus = $admintalk->getquota("user.baseplus");
-    $self->assert_num_equals(3, scalar @origplus);
+    xlog "Check that the quotas were updated as expected";
+    $self->_set_quotaroot('user.base');
+    $self->_check_usages([int($exp_base/1024)]);
+    $self->_set_quotaroot('user.baseplus');
+    $self->_check_usages([int($exp_baseplus/1024)]);
 
-    $self->{instance}->run_command({ cyrus => 1 }, 'quota', '-f', "user.base");
+    xlog "Run quota -f";
+    $self->{instance}->run_command({ cyrus => 1 }, 'quota', '-f');
 
-    my @nextplus = $admintalk->getquota("user.baseplus");
-    $self->assert_num_equals(3, scalar @nextplus);
+    xlog "Check that the quotas were unchanged by quota -f";
+    $self->_set_quotaroot('user.base');
+    $self->_check_usages([int($exp_base/1024)]);
+    $self->_set_quotaroot('user.baseplus');
+    $self->_check_usages([int($exp_baseplus/1024)]);
 
-    # usage should be unchanged
-    $self->assert($origplus[1] == $nextplus[1],
-		  "usage of subdir (1: $origplus[1], 2: $nextplus[1])");
+    my $bogus_base = $exp_base + 20000 + rand(30000);
+    my $bogus_baseplus = $exp_baseplus + 50000 + rand(80000);
+    xlog "Write incorrect values to the quota db";
+    $self->_write_quota("user.base",
+			storage => [ $bogus_base, $limit ]);
+    $self->_write_quota("user.baseplus",
+			storage => [ $bogus_baseplus, $limit ]);
+
+    xlog "Check that the quotas are now bogus";
+    $self->_set_quotaroot('user.base');
+    $self->_check_usages([int($bogus_base/1024)]);
+    $self->_set_quotaroot('user.baseplus');
+    $self->_check_usages([int($bogus_baseplus/1024)]);
+
+    xlog "Run quota -f with no prefix";
+    $self->{instance}->run_command({ cyrus => 1 }, 'quota', '-f');
+
+    xlog "Check that the quotas were all fixed";
+    $self->_set_quotaroot('user.base');
+    $self->_check_usages([int($exp_base/1024)]);
+    $self->_set_quotaroot('user.baseplus');
+    $self->_check_usages([int($exp_baseplus/1024)]);
+
+    xlog "Write incorrect values to the quota db";
+    $self->_write_quota("user.base",
+			storage => [ $bogus_base, $limit ]);
+    $self->_write_quota("user.baseplus",
+			storage => [ $bogus_baseplus, $limit ]);
+
+    xlog "Check that the quotas are now bogus";
+    $self->_set_quotaroot('user.base');
+    $self->_check_usages([int($bogus_base/1024)]);
+    $self->_set_quotaroot('user.baseplus');
+    $self->_check_usages([int($bogus_baseplus/1024)]);
+
+    xlog "Run quota -f on user.base only";
+    $self->{instance}->run_command({ cyrus => 1 }, 'quota', '-f', 'user.base');
+
+    xlog "Check that only the user.base quotas were fixed";
+    $self->_set_quotaroot('user.base');
+    $self->_check_usages([int($exp_base/1024)]);
+    $self->_set_quotaroot('user.baseplus');
+    $self->_check_usages([int($bogus_baseplus/1024)]);
+
+    xlog "Write incorrect values to the quota db";
+    $self->_write_quota("user.base",
+			storage => [ $bogus_base, $limit ]);
+    $self->_write_quota("user.baseplus",
+			storage => [ $bogus_baseplus, $limit ]);
+
+    xlog "Check that the quotas are now bogus";
+    $self->_set_quotaroot('user.base');
+    $self->_check_usages([int($bogus_base/1024)]);
+    $self->_set_quotaroot('user.baseplus');
+    $self->_check_usages([int($bogus_baseplus/1024)]);
+
+    xlog "Run quota -f on user.baseplus only";
+    $self->{instance}->run_command({ cyrus => 1 }, 'quota', '-f', 'user.baseplus');
+
+    xlog "Check that only the user.baseplus quotas were fixed";
+    $self->_set_quotaroot('user.base');
+    $self->_check_usages([int($bogus_base/1024)]);
+    $self->_set_quotaroot('user.baseplus');
+    $self->_check_usages([int($exp_baseplus/1024)]);
 }
 
 sub test_upgrade_v2_4
