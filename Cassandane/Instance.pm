@@ -439,7 +439,7 @@ sub start
     }
 }
 
-sub _emit_valgrind_logs
+sub _check_valgrind_logs
 {
     my ($self) = @_;
 
@@ -471,6 +471,30 @@ sub _emit_valgrind_logs
     closedir VGLOGS;
 
     die "Valgrind found errors" if $nerrs;
+}
+
+sub _check_cores
+{
+    my ($self) = @_;
+
+    my $coredir = $self->{basedir} . '/conf/cores';
+    my $ncores = 0;
+
+    opendir CORES, $coredir
+	or die "Cannot open directory $coredir for reading: $!";
+    while (my $_ = readdir CORES)
+    {
+	next if m/^\./;
+	next unless m/^core(\.\d+)?$/;
+	my $core = "$coredir/$_";
+	next if -z $core;
+	$ncores++;
+
+	xlog "Found core file $core";
+    }
+    closedir CORES;
+
+    die "Core files found" if $ncores;
 }
 
 # Stop a given PID.  Returns 1 if the process died
@@ -527,7 +551,8 @@ sub stop
     }
     # Note: no need to reap this daemon which is not our child anymore
 
-    $self->_emit_valgrind_logs();
+    $self->_check_valgrind_logs();
+    $self->_check_cores();
 
 #     return if ($self->{persistent});
 #     rmtree $self->{basedir};
