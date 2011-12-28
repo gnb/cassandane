@@ -80,7 +80,9 @@ sub new
 	installation => 'default',
 	cyrus_prefix => undef,
 	config => Cassandane::Config->default()->clone(),
+	starts => [],
 	services => {},
+	events => [],
 	re_use_dir => 0,
 	setup_mailbox => 1,
 	persistent => 0,
@@ -183,6 +185,18 @@ sub get_service
     return $self->{services}->{$name};
 }
 
+sub add_start
+{
+    my ($self, %params) = @_;
+    push(@{$self->{starts}}, Cassandane::MasterStart->new(%params));
+}
+
+sub add_event
+{
+    my ($self, %params) = @_;
+    push(@{$self->{events}}, Cassandane::MasterEvent->new(%params));
+}
+
 sub _binary
 {
     my ($self, $name) = @_;
@@ -281,6 +295,34 @@ sub _generate_imapd_conf
     $self->{config}->generate($self->_imapd_conf());
 }
 
+sub _emit_master_entry
+{
+    my ($self, $entry) = @_;
+
+    my $params = $entry->master_params();
+    my $name = delete $params->{name};
+
+    # Convert ->{argv} to ->{cmd}
+    my $argv = delete $params->{argv};
+    die "No argv argument"
+	unless defined $argv;
+    my $bin = shift @$argv;
+    $params->{cmd} = join(' ',
+	$self->_binary($bin),
+	'-C', $self->_imapd_conf(),
+	@$argv
+    );
+
+    print MASTER "    $name";
+    while (my ($k, $v) = each %$params)
+    {
+	$v = "\"$v\""
+	    if ($v =~ m/\s/);
+	print MASTER " $k=$v";
+    }
+    print MASTER "\n";
+}
+
 sub _generate_master_conf
 {
     my ($self) = @_;
@@ -288,31 +330,28 @@ sub _generate_master_conf
     my $filename = $self->_master_conf();
     open MASTER,'>',$filename
 	or die "Cannot open $filename for writing: $!";
-    print MASTER "SERVICES {\n";
 
-    foreach my $srv (values %{$self->{services}})
+    if (scalar @{$self->{starts}})
     {
-	my $mp = $srv->master_params();
-
-	# Fix up {cmd}
-	my $bin = shift @{$mp->{cmd}};
-	$mp->{cmd} = join(' ',
-	    $self->_binary($bin),
-	    '-C', $self->_imapd_conf(),
-	    @{$mp->{cmd}}
-	);
-
-	print MASTER "    $srv->{name}";
-	while (my ($k, $v) = each %$mp)
-	{
-	    $v = "\"$v\""
-		if ($v =~ m/\s/);
-	    print MASTER " $k=$v";
-	}
-	print MASTER "\n";
+	print MASTER "START {\n";
+	map { $self->_emit_master_entry($_); } @{$self->{starts}};
+	print MASTER "}\n";
     }
 
-    print MASTER "}\n";
+    if (scalar %{$self->{services}})
+    {
+	print MASTER "SERVICES {\n";
+	map { $self->_emit_master_entry($_); } values %{$self->{services}};
+	print MASTER "}\n";
+    }
+
+    if (scalar @{$self->{events}})
+    {
+	print MASTER "EVENTS {\n";
+	map { $self->_emit_master_entry($_); } @{$self->{events}};
+	print MASTER "}\n";
+    }
+
     close MASTER;
 }
 
