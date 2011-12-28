@@ -82,9 +82,9 @@ sub _otherparams
 {
     my ($invocant) = @_;
     my $class = ref($invocant) || $invocant;
-    my $varname = "$class::otherparams";
+    my $varname = $class . "::otherparams";
     no strict "refs";
-    return @{$$varname};
+    return @$varname;
 }
 
 # Return a hash of key,value pairs which need to go into the line in the
