@@ -62,7 +62,7 @@ sub new
     );
 
     $self->{instance} = Cassandane::Instance->new(config => $conf);
-    $self->{instance}->add_service('imap');
+    $self->{instance}->add_service(name => 'imap');
 
     $self->{gen} = Cassandane::Generator->new();
 
