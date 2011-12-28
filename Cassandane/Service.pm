@@ -46,8 +46,6 @@ use base qw(Cassandane::MasterEntry);
 use Cassandane::Util::Log;
 use Cassandane::MessageStoreFactory;
 
-my @otherparams = qw(prefork maxchild maxforkrate maxfds proto babysit);
-
 my $next_port = 9100;
 sub alloc_port
 {
@@ -70,6 +68,13 @@ sub new
 
     return $self;
 }
+
+sub _otherparams
+{
+    my ($self) = @_;
+    return ( qw(prefork maxchild maxforkrate maxfds proto babysit) );
+}
+
 
 # Return a hash of parameters suitable for passing
 # to MessageStoreFactory::create.

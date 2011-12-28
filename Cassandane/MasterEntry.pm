@@ -61,13 +61,13 @@ sub new
     die "No argv= parameter"
 	unless defined $argv && scalar @$argv;
 
-    my $self =
+    my $self = bless
     {
 	name => $name,
 	argv => $argv,
-    };
+    }, $class;
 
-    foreach my $a ($class->_otherparams())
+    foreach my $a ($self->_otherparams())
     {
 	$self->{$a} = delete $params{$a}
 	    if defined $params{$a};
@@ -75,16 +75,7 @@ sub new
     die "Unexpected parameters: " . join(" ", keys %params)
 	if scalar %params;
 
-    return bless $self, $class;
-}
-
-sub _otherparams
-{
-    my ($invocant) = @_;
-    my $class = ref($invocant) || $invocant;
-    my $varname = $class . "::otherparams";
-    no strict "refs";
-    return @$varname;
+    return $self;
 }
 
 # Return a hash of key,value pairs which need to go into the line in the
@@ -104,21 +95,29 @@ sub master_params
 package Cassandane::MasterStart;
 use base qw(Cassandane::MasterEntry);
 
-our @otherparams;
+sub new
+{
+    return shift->SUPER::new(@_);
+}
+
+sub _otherparams
+{
+    my ($self) = @_;
+    return ();
+}
+
+package Cassandane::MasterEvent;
+use base qw(Cassandane::MasterEntry);
 
 sub new
 {
     return shift->SUPER::new(@_);
 }
 
-package Cassandane::MasterEvent;
-use base qw(Cassandane::MasterEntry);
-
-our @otherparams = qw(period at);
-
-sub new
+sub _otherparams
 {
-    return shift->SUPER::new(@_);
+    my ($self) = @_;
+    return ( qw(period at) );
 }
 
 1;
