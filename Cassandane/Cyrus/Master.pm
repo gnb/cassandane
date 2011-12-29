@@ -212,6 +212,7 @@ sub lemming_wait
 	{
 	    my $census = $self->lemming_census();
 	    map {
+		return 0 if !defined $census->{$_};
 		return 0 if $census->{$_}->{live} != $expected{$_};
 	    } keys %expected;
 	    return 1;
