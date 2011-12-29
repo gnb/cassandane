@@ -535,7 +535,7 @@ sub _check_cores
     }
     closedir CORES;
 
-    die "Core files found" if $ncores;
+    die "Core files found in $coredir" if $ncores;
 }
 
 # Stop a given PID.  Returns 1 if the process died
