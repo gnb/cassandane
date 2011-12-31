@@ -59,6 +59,7 @@ sub store_params
     my ($self, %params) = @_;
 
     $params{type} = 'imap';
+    $params{address_family} = $self->{address_family};
     $params{host} = $self->{host};
     $params{port} = $self->{port};
     $params{folder} = 'inbox'
